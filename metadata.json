@@ -1,0 +1,6 @@
+{
+  "name": "Ascend",
+  "description": "A cinematic personal character-development and time tracking system combining deep discipline, XP progression, 13-level mastery, sleep scheduling, and activity analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

@@ -196,6 +196,7 @@ class MainActivity : ComponentActivity() {
                                     uiState = uiState,
                                     onStartActivity = { actId -> viewModel.startActivity(actId) },
                                     onOpenTimer = { actId -> navController.navigate("timer/$actId") },
+                                    onToggleHabit = { actId -> viewModel.toggleHabit(actId) },
                                     onNavigateToLevels = { navController.navigate(Screen.Levels.route) }
                                 )
                             }
@@ -219,11 +220,13 @@ class MainActivity : ComponentActivity() {
                                     onToggleDark = { viewModel.toggleDarkMode(it) },
                                     onToggleNotifications = { viewModel.toggleNotifications(it) },
                                     onUpdateGoal = { actId, min -> viewModel.updateDailyGoal(actId, min) },
+                                    onUpdateActivity = { act -> viewModel.updateActivity(act) },
+                                    onDeleteActivity = { actId -> viewModel.deleteActivity(actId) },
                                     onUpdateSleepSchedule = { bStart, bEnd, wStart, wEnd ->
                                         viewModel.updateSleepSchedule(bStart, bEnd, wStart, wEnd)
                                     },
-                                    onCreateCustomActivity = { name, desc, min, hex, icon, cont ->
-                                        viewModel.createCustomActivity(name, desc, min, hex, icon, cont)
+                                    onCreateCustomActivity = { name, desc, type, min, days, hex, icon, cont ->
+                                        viewModel.createCustomActivity(name, desc, type, min, days, hex, icon, cont)
                                     },
                                     onNavigateToCorrections = { navController.navigate("corrections") },
                                     onSeedDemoData = { viewModel.seedDemoData() },
@@ -243,7 +246,10 @@ class MainActivity : ComponentActivity() {
                                     onStartActivity = { viewModel.startActivity(it) },
                                     onBreakIn = { viewModel.breakIn() },
                                     onBreakOut = { viewModel.breakOut() },
-                                    onPunchOut = { viewModel.punchOut() }
+                                    onPunchOut = { viewModel.punchOut() },
+                                    onToggleHabit = { id, dateStr -> viewModel.toggleHabit(id, dateStr) },
+                                    onRecordRelapse = { id, dateStr, note -> viewModel.recordHabitRelapse(id, dateStr, note) },
+                                    onDeleteActivity = { id -> viewModel.deleteActivity(id) }
                                 )
                             }
 

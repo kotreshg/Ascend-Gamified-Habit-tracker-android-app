@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,14 +17,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ActivityEntity
+import com.example.data.model.ActivityType
 import com.example.ui.theme.*
 import com.example.ui.viewmodel.AscendUiState
+import java.time.DayOfWeek
 
 @Composable
 fun SettingsScreen(
@@ -32,15 +34,18 @@ fun SettingsScreen(
     onToggleDark: (Boolean) -> Unit,
     onToggleNotifications: (Boolean) -> Unit,
     onUpdateGoal: (String, Int) -> Unit,
+    onUpdateActivity: (ActivityEntity) -> Unit,
+    onDeleteActivity: (String) -> Unit,
     onUpdateSleepSchedule: (Int, Int, Int, Int) -> Unit,
-    onCreateCustomActivity: (String, String, Int, String, String, Boolean) -> Unit,
+    onCreateCustomActivity: (String, String, ActivityType, Int, String, String, String, Boolean) -> Unit,
     onNavigateToCorrections: () -> Unit,
     onSeedDemoData: () -> Unit,
     onResetData: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var showNameDialog by remember { mutableStateOf(false) }
-    var showGoalDialogForActivity by remember { mutableStateOf<ActivityEntity?>(null) }
+    var editActivityDialogTarget by remember { mutableStateOf<ActivityEntity?>(null) }
+    var deleteActivityConfirmTarget by remember { mutableStateOf<ActivityEntity?>(null) }
     var showSleepScheduleDialog by remember { mutableStateOf(false) }
     var showAddCustomActivityDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
@@ -136,17 +141,29 @@ fun SettingsScreen(
             }
         }
 
-        // 3. Daily Targets Section
+        // 3. Activity Schedules & Targets Section
         item {
-            Text(
-                text = "DAILY TARGET GOALS",
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 2.sp,
-                    fontSize = 10.sp
-                ),
-                color = Color(0xFFA1A1AA)
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "ACTIVITIES & SCHEDULES",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 2.sp,
+                        fontSize = 10.sp
+                    ),
+                    color = Color(0xFFA1A1AA)
+                )
+
+                Text(
+                    text = "TAP TO EDIT",
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, letterSpacing = 1.sp),
+                    color = Color(0xFF71717A)
+                )
+            }
         }
 
         items(uiState.activities) { act ->
@@ -156,7 +173,8 @@ fun SettingsScreen(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(20.dp))
                     .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp))
-                    .clickable { showGoalDialogForActivity = act },
+                    .clickable { editActivityDialogTarget = act }
+                    .testTag("manage_activity_${act.id}"),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF141414)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
@@ -167,31 +185,87 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                         Box(
                             modifier = Modifier
-                                .size(10.dp)
+                                .size(12.dp)
                                 .clip(CircleShape)
                                 .background(color)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = act.name,
-                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
-                            color = Color(0xFFF5F5F4)
-                        )
+                        Column {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    text = act.name,
+                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Medium),
+                                    color = Color(0xFFF5F5F4)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                if (act.isCore) {
+                                    Surface(
+                                        color = Color.White.copy(alpha = 0.08f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "CORE",
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            color = Color(0xFFA1A1AA),
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                } else {
+                                    val typeLabel = when (act.activityType) {
+                                        ActivityType.HABIT_BUILD -> "BUILD"
+                                        ActivityType.HABIT_QUIT -> "QUIT"
+                                        ActivityType.TIME_BASED -> "TIME"
+                                    }
+                                    Surface(
+                                        color = color.copy(alpha = 0.15f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    ) {
+                                        Text(
+                                            text = typeLabel,
+                                            style = MaterialTheme.typography.labelSmall.copy(
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold
+                                            ),
+                                            color = color,
+                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Days: ${act.getFormattedScheduledDays()}" +
+                                        if (act.activityType == ActivityType.TIME_BASED) " • ${act.dailyGoalMinutes / 60}h ${act.dailyGoalMinutes % 60}m/day" else "",
+                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                color = Color(0xFF71717A)
+                            )
+                        }
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            text = "${act.dailyGoalMinutes / 60}h ${act.dailyGoalMinutes % 60}m / day",
-                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                            color = color
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
+                        if (!act.isCore) {
+                            IconButton(
+                                onClick = { deleteActivityConfirmTarget = act },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.DeleteOutline,
+                                    contentDescription = "Delete",
+                                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+
                         Icon(
-                            imageVector = Icons.Default.ChevronRight,
-                            contentDescription = null,
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit",
                             tint = Color(0xFF71717A),
                             modifier = Modifier.size(18.dp)
                         )
@@ -249,20 +323,21 @@ fun SettingsScreen(
             }
         }
 
-        // 5. Add Custom Activity Button
+        // 5. Add Custom Activity Button (Time-Based, Habit Build, or Habit Quit)
         item {
             OutlinedButton(
                 onClick = { showAddCustomActivityDialog = true },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(52.dp),
+                    .height(52.dp)
+                    .testTag("add_custom_activity_button"),
                 shape = RoundedCornerShape(16.dp),
                 border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = GoldPrimary)
             ) {
                 Icon(imageVector = Icons.Default.Add, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("ADD CUSTOM ACTIVITY", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp))
+                Text("ADD ACTIVITY OR HABIT", style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp))
             }
         }
 
@@ -393,7 +468,7 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "\"Every hour you invest here is becoming part of who you are.\"",
+                        text = "\"Every hour and habit you invest here is becoming part of who you are.\"",
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                             fontSize = 13.sp
@@ -412,7 +487,7 @@ fun SettingsScreen(
         }
     }
 
-    // Dialogs
+    // Dialog: Edit Name
     if (showNameDialog) {
         var nameInput by remember { mutableStateOf(uiState.userSettings.userName) }
         AlertDialog(
@@ -442,26 +517,47 @@ fun SettingsScreen(
         )
     }
 
-    showGoalDialogForActivity?.let { act ->
+    // Dialog: Edit Activity (Goal & Scheduled Days of the Week)
+    editActivityDialogTarget?.let { act ->
         var hoursInput by remember { mutableStateOf((act.dailyGoalMinutes / 60).toString()) }
         var minInput by remember { mutableStateOf((act.dailyGoalMinutes % 60).toString()) }
+        var selectedDays by remember(act) { mutableStateOf(act.scheduledDaysSet()) }
 
         AlertDialog(
-            onDismissRequest = { showGoalDialogForActivity = null },
-            title = { Text("Set Daily Target: ${act.name}") },
+            onDismissRequest = { editActivityDialogTarget = null },
+            title = { Text("Edit ${act.name}") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = hoursInput,
-                        onValueChange = { hoursInput = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Target Hours") },
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = minInput,
-                        onValueChange = { minInput = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Target Minutes") },
-                        singleLine = true
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    if (act.activityType == ActivityType.TIME_BASED) {
+                        Text("Daily Goal:", style = MaterialTheme.typography.labelMedium, color = Color(0xFFA1A1AA))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedTextField(
+                                value = hoursInput,
+                                onValueChange = { hoursInput = it.filter { ch -> ch.isDigit() } },
+                                label = { Text("Hours") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            OutlinedTextField(
+                                value = minInput,
+                                onValueChange = { minInput = it.filter { ch -> ch.isDigit() } },
+                                label = { Text("Minutes") },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+
+                    Text("Scheduled Days of the Week:", style = MaterialTheme.typography.labelMedium, color = Color(0xFFA1A1AA))
+                    DaysOfWeekSelector(
+                        selectedDays = selectedDays,
+                        onToggleDay = { dayVal ->
+                            selectedDays = if (selectedDays.contains(dayVal)) {
+                                if (selectedDays.size > 1) selectedDays - dayVal else selectedDays
+                            } else {
+                                selectedDays + dayVal
+                            }
+                        }
                     )
                 }
             },
@@ -470,14 +566,176 @@ fun SettingsScreen(
                     val h = hoursInput.toIntOrNull() ?: 0
                     val m = minInput.toIntOrNull() ?: 0
                     val totalMin = (h * 60 + m).coerceIn(1, 1440)
-                    onUpdateGoal(act.id, totalMin)
-                    showGoalDialogForActivity = null
+                    val daysStr = selectedDays.sorted().joinToString(",")
+                    onUpdateActivity(
+                        act.copy(
+                            dailyGoalMinutes = totalMin,
+                            scheduledDays = daysStr
+                        )
+                    )
+                    editActivityDialogTarget = null
                 }) {
-                    Text("Update Goal")
+                    Text("Save Changes")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showGoalDialogForActivity = null }) { Text("Cancel") }
+                TextButton(onClick = { editActivityDialogTarget = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Dialog: Delete Activity Confirmation (Requirement 5)
+    deleteActivityConfirmTarget?.let { act ->
+        AlertDialog(
+            onDismissRequest = { deleteActivityConfirmTarget = null },
+            title = { Text("Delete '${act.name}'?") },
+            text = {
+                Text("Are you sure you want to permanently delete '${act.name}' and all its tracked history? This action cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteActivity(act.id)
+                        deleteActivityConfirmTarget = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) {
+                    Text("Delete Activity", fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteActivityConfirmTarget = null }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Dialog: Create Custom Activity (Time-based, Habit Build, or Habit Quit)
+    if (showAddCustomActivityDialog) {
+        var customName by remember { mutableStateOf("") }
+        var selectedType by remember { mutableStateOf(ActivityType.TIME_BASED) }
+        var customHours by remember { mutableStateOf("1") }
+        var selectedDays by remember { mutableStateOf(setOf(1, 2, 3, 4, 5, 6, 7)) }
+        var customContributes by remember { mutableStateOf(true) }
+
+        AlertDialog(
+            onDismissRequest = { showAddCustomActivityDialog = false },
+            title = { Text("Create Practice or Habit") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Type selector
+                    Text("Practice Type:", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA1A1AA))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedType == ActivityType.TIME_BASED,
+                            onClick = { selectedType = ActivityType.TIME_BASED },
+                            label = { Text("Timer", style = MaterialTheme.typography.labelSmall) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = selectedType == ActivityType.HABIT_BUILD,
+                            onClick = { selectedType = ActivityType.HABIT_BUILD },
+                            label = { Text("Build", style = MaterialTheme.typography.labelSmall) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        FilterChip(
+                            selected = selectedType == ActivityType.HABIT_QUIT,
+                            onClick = { selectedType = ActivityType.HABIT_QUIT },
+                            label = { Text("Quit", style = MaterialTheme.typography.labelSmall) },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = customName,
+                        onValueChange = { customName = it },
+                        label = {
+                            Text(
+                                when (selectedType) {
+                                    ActivityType.TIME_BASED -> "Activity Name (e.g. Coding, Reading)"
+                                    ActivityType.HABIT_BUILD -> "Habit to Build (e.g. Read 10 Pages)"
+                                    ActivityType.HABIT_QUIT -> "Habit to Quit (e.g. No Sugar, Stop Vaping)"
+                                }
+                            )
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    if (selectedType == ActivityType.TIME_BASED) {
+                        OutlinedTextField(
+                            value = customHours,
+                            onValueChange = { customHours = it.filter { ch -> ch.isDigit() } },
+                            label = { Text("Daily Target Hours") },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+
+                    Text("Scheduled Days:", style = MaterialTheme.typography.labelSmall, color = Color(0xFFA1A1AA))
+                    DaysOfWeekSelector(
+                        selectedDays = selectedDays,
+                        onToggleDay = { dayVal ->
+                            selectedDays = if (selectedDays.contains(dayVal)) {
+                                if (selectedDays.size > 1) selectedDays - dayVal else selectedDays
+                            } else {
+                                selectedDays + dayVal
+                            }
+                        }
+                    )
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Contribute to Main System", style = MaterialTheme.typography.bodySmall)
+                        Switch(checked = customContributes, onCheckedChange = { customContributes = it })
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    if (customName.isNotBlank()) {
+                        val hours = customHours.toIntOrNull() ?: 1
+                        val daysStr = selectedDays.sorted().joinToString(",")
+                        val colorHex = when (selectedType) {
+                            ActivityType.HABIT_QUIT -> "#EF4444"
+                            ActivityType.HABIT_BUILD -> "#10B981"
+                            ActivityType.TIME_BASED -> "#E5A93B"
+                        }
+                        val iconName = when (selectedType) {
+                            ActivityType.HABIT_QUIT -> "shield"
+                            ActivityType.HABIT_BUILD -> "check_circle"
+                            ActivityType.TIME_BASED -> "star"
+                        }
+
+                        onCreateCustomActivity(
+                            customName.trim(),
+                            when (selectedType) {
+                                ActivityType.HABIT_QUIT -> "Sovereign abstinence habit"
+                                ActivityType.HABIT_BUILD -> "Daily habit building practice"
+                                ActivityType.TIME_BASED -> "Self-development practice"
+                            },
+                            selectedType,
+                            hours * 60,
+                            daysStr,
+                            colorHex,
+                            iconName,
+                            customContributes
+                        )
+                    }
+                    showAddCustomActivityDialog = false
+                }) {
+                    Text("Create")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddCustomActivityDialog = false }) { Text("Cancel") }
             }
         )
     }
@@ -506,62 +764,6 @@ fun SettingsScreen(
         )
     }
 
-    if (showAddCustomActivityDialog) {
-        var customName by remember { mutableStateOf("") }
-        var customHours by remember { mutableStateOf("1") }
-        var customContributes by remember { mutableStateOf(true) }
-
-        AlertDialog(
-            onDismissRequest = { showAddCustomActivityDialog = false },
-            title = { Text("Create Custom Activity") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    OutlinedTextField(
-                        value = customName,
-                        onValueChange = { customName = it },
-                        label = { Text("Activity Name (e.g. Writing, Coding)") },
-                        singleLine = true
-                    )
-                    OutlinedTextField(
-                        value = customHours,
-                        onValueChange = { customHours = it.filter { ch -> ch.isDigit() } },
-                        label = { Text("Daily Target Hours") },
-                        singleLine = true
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Contribute to Main System", style = MaterialTheme.typography.bodyMedium)
-                        Switch(checked = customContributes, onCheckedChange = { customContributes = it })
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    if (customName.isNotBlank()) {
-                        val hours = customHours.toIntOrNull() ?: 1
-                        onCreateCustomActivity(
-                            customName.trim(),
-                            "Custom self-development practice",
-                            hours * 60,
-                            "#E5A93B",
-                            "star",
-                            customContributes
-                        )
-                    }
-                    showAddCustomActivityDialog = false
-                }) {
-                    Text("Create")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showAddCustomActivityDialog = false }) { Text("Cancel") }
-            }
-        )
-    }
-
     if (showResetConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showResetConfirmDialog = false },
@@ -584,5 +786,48 @@ fun SettingsScreen(
                 TextButton(onClick = { showResetConfirmDialog = false }) { Text("Cancel") }
             }
         )
+    }
+}
+
+@Composable
+fun DaysOfWeekSelector(
+    selectedDays: Set<Int>,
+    onToggleDay: (Int) -> Unit
+) {
+    val dayLabels = listOf(
+        1 to "M",
+        2 to "T",
+        3 to "W",
+        4 to "T",
+        5 to "F",
+        6 to "S",
+        7 to "S"
+    )
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        dayLabels.forEach { (dayVal, label) ->
+            val isSelected = selectedDays.contains(dayVal)
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(if (isSelected) GoldPrimary else Color(0xFF1E1E24))
+                    .border(1.dp, if (isSelected) GoldPrimary else Color.White.copy(alpha = 0.08f), CircleShape)
+                    .clickable { onToggleDay(dayVal) },
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 12.sp
+                    ),
+                    color = if (isSelected) Color(0xFF0A0A0A) else Color(0xFFA1A1AA)
+                )
+            }
+        }
     }
 }

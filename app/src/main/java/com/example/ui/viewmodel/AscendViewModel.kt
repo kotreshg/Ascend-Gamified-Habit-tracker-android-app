@@ -4,11 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.db.AscendDatabase
-import com.example.data.model.ActivityEntity
-import com.example.data.model.BreakEntity
-import com.example.data.model.SessionEntity
-import com.example.data.model.SessionStatus
-import com.example.data.model.UserSettingsEntity
+import com.example.data.model.*
 import com.example.data.repository.AscendRepository
 import com.example.domain.engine.*
 import kotlinx.coroutines.Dispatchers
@@ -16,11 +12,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.format.DateTimeFormatter
-import kotlin.math.max
 
 data class LevelUpCelebration(
     val activity: ActivityEntity,
@@ -32,6 +25,10 @@ data class AscendUiState(
     val activeSession: SessionEntity? = null,
     val activeActivity: ActivityEntity? = null,
     val activeSessionBreaks: List<BreakEntity> = emptyList(),
+    val allSessions: List<SessionEntity> = emptyList(),
+    val allBreaks: List<BreakEntity> = emptyList(),
+    val allHabitCompletions: List<HabitCompletionEntity> = emptyList(),
+    val habitStats: Map<String, HabitStreakInfo> = emptyMap(),
     val currentSessionElapsedSeconds: Long = 0L,
     val currentBreakElapsedSeconds: Long = 0L,
     val userSettings: UserSettingsEntity = UserSettingsEntity(),
@@ -60,6 +57,7 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
             activityDao = database.activityDao(),
             sessionDao = database.sessionDao(),
             breakDao = database.breakDao(),
+            habitCompletionDao = database.habitCompletionDao(),
             settingsDao = database.settingsDao()
         )
 
@@ -68,7 +66,7 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
             AscendDatabase.populateInitialData(database)
         }
 
-        // Ticker loop for live second updates (used only for real-time display calculation from actual timestamps)
+        // Ticker loop for live second updates
         viewModelScope.launch(Dispatchers.Default) {
             while (isActive) {
                 _currentTimeMillis.value = System.currentTimeMillis()
@@ -83,13 +81,22 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
                 repository.activeSessionFlow,
                 repository.allSessionsFlow,
                 repository.allBreaksFlow,
-                repository.settingsFlow
-            ) { activities, activeSession, allSessions, allBreaks, settings ->
-                DbSnapshot(
+                repository.allHabitCompletionsFlow
+            ) { activities, activeSession, allSessions, allBreaks, habitCompletions ->
+                IntermediateSnapshot(
                     activities = activities,
                     activeSession = activeSession,
                     allSessions = allSessions,
                     allBreaks = allBreaks,
+                    habitCompletions = habitCompletions
+                )
+            }.combine(repository.settingsFlow) { snapshot, settings ->
+                DbSnapshot(
+                    activities = snapshot.activities,
+                    activeSession = snapshot.activeSession,
+                    allSessions = snapshot.allSessions,
+                    allBreaks = snapshot.allBreaks,
+                    habitCompletions = snapshot.habitCompletions,
                     settings = settings ?: UserSettingsEntity()
                 )
             }.combine(_currentTimeMillis) { snapshot, nowMillis ->
@@ -98,6 +105,7 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
                     activeSession = snapshot.activeSession,
                     allSessions = snapshot.allSessions,
                     allBreaks = snapshot.allBreaks,
+                    habitCompletions = snapshot.habitCompletions,
                     settings = snapshot.settings,
                     nowMillis = nowMillis
                 )
@@ -107,11 +115,20 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    private data class IntermediateSnapshot(
+        val activities: List<ActivityEntity>,
+        val activeSession: SessionEntity?,
+        val allSessions: List<SessionEntity>,
+        val allBreaks: List<BreakEntity>,
+        val habitCompletions: List<HabitCompletionEntity>
+    )
+
     private data class DbSnapshot(
         val activities: List<ActivityEntity>,
         val activeSession: SessionEntity?,
         val allSessions: List<SessionEntity>,
         val allBreaks: List<BreakEntity>,
+        val habitCompletions: List<HabitCompletionEntity>,
         val settings: UserSettingsEntity
     )
 
@@ -120,11 +137,13 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
         activeSession: SessionEntity?,
         allSessions: List<SessionEntity>,
         allBreaks: List<BreakEntity>,
+        habitCompletions: List<HabitCompletionEntity>,
         settings: UserSettingsEntity,
         nowMillis: Long
     ): AscendUiState {
         val activityMap = activities.associateBy { it.id }
         val breaksBySessionId = allBreaks.groupBy { it.sessionId }
+        val habitCompletionsByActivity = habitCompletions.groupBy { it.activityId }
 
         val activeActivity = activeSession?.let { activityMap[it.activityId] }
         val activeBreaks = activeSession?.let { breaksBySessionId[it.id] ?: emptyList() } ?: emptyList()
@@ -204,10 +223,11 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
             var totalDayXp = 0
 
             activities.filter { it.contributesToMainSystem }.forEach { act ->
+                val isScheduledToday = act.isScheduledOn(parsedDate)
                 val min = actMinutes[act.id] ?: 0
-                val goal = act.dailyGoalMinutes
-                val xp = ProgressionEngine.calculateDailyXp(min, goal)
-                val pct = if (goal > 0) (min.toFloat() / goal.toFloat()) else 0f
+                val goal = if (isScheduledToday) act.dailyGoalMinutes else 0
+                val xp = ProgressionEngine.calculateDailyXp(min, act.dailyGoalMinutes)
+                val pct = if (act.dailyGoalMinutes > 0) (min.toFloat() / act.dailyGoalMinutes.toFloat()) else 0f
 
                 actXp[act.id] = xp
                 actPct[act.id] = pct
@@ -237,23 +257,57 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
             )
         }
 
-        val todayDateStr = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val todayDate = LocalDate.now()
+        val todayDateStr = todayDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
         val todaySummary = dailySummaries[todayDateStr]
 
-        // 3. Calculate Progression per Activity
-        val progressionStates = mutableMapOf<String, ProgressionState>()
+        // 3. Calculate Habit Stats
+        val habitStatsMap = mutableMapOf<String, HabitStreakInfo>()
         activities.forEach { act ->
-            var totalActXp = 0
-            dailySummaries.values.forEach { day ->
-                totalActXp += day.activityXp[act.id] ?: 0
+            val completions = habitCompletionsByActivity[act.id] ?: emptyList()
+            if (act.activityType == ActivityType.HABIT_BUILD) {
+                habitStatsMap[act.id] = StreakEngine.calculateHabitBuildStats(act, completions, todayDate)
+            } else if (act.activityType == ActivityType.HABIT_QUIT) {
+                habitStatsMap[act.id] = StreakEngine.calculateHabitQuitStats(act, completions, todayDate)
             }
-            progressionStates[act.id] = ProgressionEngine.calculateProgression(act.id, totalActXp)
         }
 
-        // 4. Calculate Streaks & Summary Stats
-        val streakStats = StreakEngine.calculateStreakStats(dailySummaries, LocalDate.now())
+        // 4. Calculate Progression per Activity
+        val progressionStates = mutableMapOf<String, ProgressionState>()
+        activities.forEach { act ->
+            when (act.activityType) {
+                ActivityType.TIME_BASED -> {
+                    var totalActXp = 0
+                    dailySummaries.values.forEach { day ->
+                        totalActXp += day.activityXp[act.id] ?: 0
+                    }
+                    progressionStates[act.id] = ProgressionEngine.calculateProgression(act.id, totalActXp)
+                }
+                ActivityType.HABIT_BUILD -> {
+                    val stats = habitStatsMap[act.id] ?: HabitStreakInfo(0, 0, 0, false)
+                    progressionStates[act.id] = ProgressionEngine.calculateHabitProgression(
+                        activityId = act.id,
+                        streak = stats.currentStreak,
+                        totalCompletions = stats.totalCompletions,
+                        isHabitQuit = false
+                    )
+                }
+                ActivityType.HABIT_QUIT -> {
+                    val stats = habitStatsMap[act.id] ?: HabitStreakInfo(0, 0, 0, false)
+                    progressionStates[act.id] = ProgressionEngine.calculateHabitProgression(
+                        activityId = act.id,
+                        streak = stats.currentStreak,
+                        totalCompletions = stats.totalCompletions,
+                        isHabitQuit = true
+                    )
+                }
+            }
+        }
 
-        // 5. Evaluate Sleep Analysis for Today/Recent Night
+        // 5. Calculate Streaks & Summary Stats
+        val streakStats = StreakEngine.calculateStreakStats(dailySummaries, todayDate)
+
+        // 6. Evaluate Sleep Analysis for Today/Recent Night
         val sleepSessions = allSessions.filter { it.activityId == "sleep" }.sortedByDescending { it.startTime }
         val recentSleep = sleepSessions.firstOrNull()
         val sleepGoalMin = activityMap["sleep"]?.dailyGoalMinutes ?: 480
@@ -299,7 +353,12 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
                             level = prog.currentLevel,
                             title = prog.currentTitle,
                             xpThreshold = prog.prevLevelXp,
-                            description = ProgressionEngine.getLevelTitle(act.id, prog.currentLevel).second,
+                            description = ProgressionEngine.getLevelTitle(
+                                act.id,
+                                prog.currentLevel,
+                                isHabitQuit = act.activityType == ActivityType.HABIT_QUIT,
+                                isHabitBuild = act.activityType == ActivityType.HABIT_BUILD
+                            ).second,
                             activityId = act.id
                         )
                         levelUpToCelebrate = LevelUpCelebration(activity = act, levelInfo = levelInfo)
@@ -313,6 +372,10 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
             activeSession = activeSession,
             activeActivity = activeActivity,
             activeSessionBreaks = activeBreaks,
+            allSessions = allSessions,
+            allBreaks = allBreaks,
+            allHabitCompletions = habitCompletions,
+            habitStats = habitStatsMap,
             currentSessionElapsedSeconds = sessionElapsedSec,
             currentBreakElapsedSeconds = currentBreakElapsedSec,
             userSettings = settings,
@@ -354,9 +417,36 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    fun toggleHabit(activityId: String, dateString: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.toggleHabitCompletion(activityId, dateString, isSuccess = true)
+        }
+    }
+
+    fun recordHabitRelapse(activityId: String, dateString: String = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE), note: String = "") {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.recordHabitRelapse(activityId, dateString, note)
+        }
+    }
+
     fun updateDailyGoal(activityId: String, goalMinutes: Int) {
         viewModelScope.launch(Dispatchers.IO) {
             repository.updateActivityGoal(activityId, goalMinutes)
+        }
+    }
+
+    fun updateActivity(activity: ActivityEntity) {
+        viewModelScope.launch(Dispatchers.IO) {
+            repository.updateActivity(activity)
+        }
+    }
+
+    fun deleteActivity(activityId: String, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val deleted = repository.deleteActivity(activityId)
+            launch(Dispatchers.Main) {
+                onResult(deleted)
+            }
         }
     }
 
@@ -381,7 +471,9 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
     fun createCustomActivity(
         name: String,
         description: String,
-        dailyGoalMinutes: Int,
+        activityType: ActivityType = ActivityType.TIME_BASED,
+        dailyGoalMinutes: Int = 60,
+        scheduledDays: String = "1,2,3,4,5,6,7",
         colorHex: String,
         iconName: String,
         contributesToMainSystem: Boolean
@@ -390,7 +482,9 @@ class AscendViewModel(application: Application) : AndroidViewModel(application) 
             repository.createCustomActivity(
                 name = name,
                 description = description,
+                activityType = activityType,
                 dailyGoalMinutes = dailyGoalMinutes,
+                scheduledDays = scheduledDays,
                 colorHex = colorHex,
                 iconName = iconName,
                 contributesToMainSystem = contributesToMainSystem

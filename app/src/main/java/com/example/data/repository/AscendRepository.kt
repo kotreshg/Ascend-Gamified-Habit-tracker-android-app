@@ -2,11 +2,13 @@ package com.example.data.repository
 
 import com.example.data.dao.ActivityDao
 import com.example.data.dao.BreakDao
+import com.example.data.dao.HabitCompletionDao
 import com.example.data.dao.SessionDao
 import com.example.data.dao.SettingsDao
-import com.example.data.db.AscendDatabase
 import com.example.data.model.ActivityEntity
+import com.example.data.model.ActivityType
 import com.example.data.model.BreakEntity
+import com.example.data.model.HabitCompletionEntity
 import com.example.data.model.SessionEntity
 import com.example.data.model.SessionStatus
 import com.example.data.model.UserSettingsEntity
@@ -19,23 +21,42 @@ class AscendRepository(
     private val activityDao: ActivityDao,
     private val sessionDao: SessionDao,
     private val breakDao: BreakDao,
+    private val habitCompletionDao: HabitCompletionDao,
     private val settingsDao: SettingsDao
 ) {
     val activitiesFlow: Flow<List<ActivityEntity>> = activityDao.getAllActivitiesFlow()
     val activeSessionFlow: Flow<SessionEntity?> = sessionDao.getActiveSessionFlow()
     val allSessionsFlow: Flow<List<SessionEntity>> = sessionDao.getAllSessionsFlow()
     val allBreaksFlow: Flow<List<BreakEntity>> = breakDao.getAllBreaksFlow()
+    val allHabitCompletionsFlow: Flow<List<HabitCompletionEntity>> = habitCompletionDao.getAllCompletionsFlow()
     val settingsFlow: Flow<UserSettingsEntity?> = settingsDao.getSettingsFlow()
 
     suspend fun getActivity(id: String): ActivityEntity? = activityDao.getActivityById(id)
 
+    fun getActivityFlow(id: String): Flow<ActivityEntity?> = activityDao.getActivityByIdFlow(id)
+
     suspend fun getSession(id: Long): SessionEntity? = sessionDao.getSessionById(id)
+
+    fun getSessionsByActivityFlow(activityId: String): Flow<List<SessionEntity>> =
+        sessionDao.getSessionsByActivityFlow(activityId)
+
+    suspend fun getSessionsByActivityAndDate(activityId: String, dateString: String): List<SessionEntity> =
+        sessionDao.getSessionsByActivityAndDate(activityId, dateString)
+
+    fun getSessionsByActivityAndDateFlow(activityId: String, dateString: String): Flow<List<SessionEntity>> =
+        sessionDao.getSessionsByActivityAndDateFlow(activityId, dateString)
 
     suspend fun getBreaksForSession(sessionId: Long): List<BreakEntity> =
         breakDao.getBreaksForSession(sessionId)
 
     fun getBreaksForSessionFlow(sessionId: Long): Flow<List<BreakEntity>> =
         breakDao.getBreaksForSessionFlow(sessionId)
+
+    fun getHabitCompletionsForActivityFlow(activityId: String): Flow<List<HabitCompletionEntity>> =
+        habitCompletionDao.getCompletionsByActivityFlow(activityId)
+
+    suspend fun getHabitCompletionsForActivity(activityId: String): List<HabitCompletionEntity> =
+        habitCompletionDao.getCompletionsByActivity(activityId)
 
     suspend fun startSession(activityId: String): Long {
         val now = System.currentTimeMillis()
@@ -45,13 +66,11 @@ class AscendRepository(
         val active = sessionDao.getActiveSession()
         if (active != null) {
             if (active.activityId == activityId) {
-                // If it's already active and on break, resume it
                 if (active.status == SessionStatus.ON_BREAK) {
                     breakOut(active.id)
                 }
                 return active.id
             } else {
-                // Punch out previous active session
                 punchOut(active.id)
             }
         }
@@ -98,7 +117,6 @@ class AscendRepository(
         val session = sessionDao.getSessionById(sessionId) ?: return
         val now = System.currentTimeMillis()
 
-        // Close any open break
         val activeBreak = breakDao.getActiveBreakForSession(sessionId)
         if (activeBreak != null) {
             breakDao.updateBreak(activeBreak.copy(endTime = now))
@@ -157,15 +175,57 @@ class AscendRepository(
         sessionDao.deleteSessionById(sessionId)
     }
 
+    suspend fun toggleHabitCompletion(activityId: String, dateString: String, isSuccess: Boolean = true, note: String = "") {
+        val existing = habitCompletionDao.getCompletion(activityId, dateString)
+        if (existing != null) {
+            // If already completed and user taps again, remove it (toggle off)
+            habitCompletionDao.deleteCompletion(activityId, dateString)
+        } else {
+            // Mark completed
+            habitCompletionDao.insertCompletion(
+                HabitCompletionEntity(
+                    activityId = activityId,
+                    dateString = dateString,
+                    completedAt = System.currentTimeMillis(),
+                    isSuccess = isSuccess,
+                    note = note
+                )
+            )
+        }
+    }
+
+    suspend fun recordHabitRelapse(activityId: String, dateString: String, note: String = "") {
+        habitCompletionDao.insertCompletion(
+            HabitCompletionEntity(
+                activityId = activityId,
+                dateString = dateString,
+                completedAt = System.currentTimeMillis(),
+                isSuccess = false,
+                note = note
+            )
+        )
+    }
+
     suspend fun updateActivityGoal(activityId: String, goalMinutes: Int) {
         val activity = activityDao.getActivityById(activityId) ?: return
         activityDao.updateActivity(activity.copy(dailyGoalMinutes = goalMinutes))
     }
 
+    suspend fun updateActivityScheduledDays(activityId: String, scheduledDays: String) {
+        val activity = activityDao.getActivityById(activityId) ?: return
+        activityDao.updateActivity(activity.copy(scheduledDays = scheduledDays))
+    }
+
+    suspend fun updateActivity(activity: ActivityEntity) {
+        activityDao.updateActivity(activity)
+    }
+
     suspend fun createCustomActivity(
         name: String,
         description: String,
-        dailyGoalMinutes: Int,
+        activityType: ActivityType = ActivityType.TIME_BASED,
+        dailyGoalMinutes: Int = 60,
+        scheduledDays: String = "1,2,3,4,5,6,7",
         colorHex: String,
         iconName: String,
         contributesToMainSystem: Boolean
@@ -176,6 +236,8 @@ class AscendRepository(
             name = name,
             description = description,
             dailyGoalMinutes = dailyGoalMinutes,
+            activityType = activityType,
+            scheduledDays = scheduledDays,
             isCore = false,
             contributesToMainSystem = contributesToMainSystem,
             colorHex = colorHex,
@@ -183,6 +245,20 @@ class AscendRepository(
             sortOrder = 10
         )
         activityDao.insertActivity(activity)
+    }
+
+    suspend fun deleteActivity(activityId: String): Boolean {
+        val activity = activityDao.getActivityById(activityId) ?: return false
+        // Protect core default activities
+        if (activity.isCore) {
+            return false
+        }
+        // Cleanly delete all associated data
+        breakDao.deleteBreaksByActivityId(activityId)
+        sessionDao.deleteSessionsByActivityId(activityId)
+        habitCompletionDao.deleteAllCompletionsForActivity(activityId)
+        activityDao.deleteActivityById(activityId)
+        return true
     }
 
     suspend fun archiveActivity(activityId: String) {
@@ -194,9 +270,9 @@ class AscendRepository(
     }
 
     suspend fun seedDemoData() {
-        // Seed 30 days of realistic, inspiring self-mastery records
         sessionDao.deleteAllSessions()
         breakDao.deleteAllBreaks()
+        habitCompletionDao.deleteAllCompletions()
 
         val today = LocalDate.now()
         val zone = java.time.ZoneId.systemDefault()
@@ -205,7 +281,7 @@ class AscendRepository(
             val date = today.minusDays(daysAgo.toLong())
             val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
-            // 1. Sleep: 22:45 to 06:45 next morning (dated on previous day's evening)
+            // 1. Sleep: 22:45 to 06:45 next morning
             val sleepStart = date.minusDays(1).atTime(22, 45).atZone(zone).toInstant().toEpochMilli()
             val sleepEnd = date.atTime(6, 45).atZone(zone).toInstant().toEpochMilli()
             val sleepSessionId = sessionDao.insertSession(
@@ -218,7 +294,6 @@ class AscendRepository(
                     isManualCorrection = false
                 )
             )
-            // Brief awakening
             val awakeStart = date.atTime(2, 30).atZone(zone).toInstant().toEpochMilli()
             val awakeEnd = date.atTime(2, 45).atZone(zone).toInstant().toEpochMilli()
             breakDao.insertBreak(
@@ -256,7 +331,7 @@ class AscendRepository(
                 BreakEntity(sessionId = studySessionId, startTime = studyBreakStart, endTime = studyBreakEnd)
             )
 
-            // 4. Workout in the evening (skip every 4th day for rest)
+            // 4. Workout in the evening (skip every 4th day)
             if (daysAgo % 4 != 0) {
                 val workoutStart = date.atTime(17, 30).atZone(zone).toInstant().toEpochMilli()
                 val workoutEnd = date.atTime(18, 35).atZone(zone).toInstant().toEpochMilli()
@@ -276,5 +351,6 @@ class AscendRepository(
     suspend fun resetAllData() {
         sessionDao.deleteAllSessions()
         breakDao.deleteAllBreaks()
+        habitCompletionDao.deleteAllCompletions()
     }
 }

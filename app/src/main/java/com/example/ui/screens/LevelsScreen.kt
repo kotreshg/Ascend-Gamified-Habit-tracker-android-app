@@ -25,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.ActivityType
 import com.example.domain.engine.LevelInfo
 import com.example.domain.engine.ProgressionEngine
 import com.example.ui.components.LevelUpDialog
@@ -41,11 +42,14 @@ fun LevelsScreen(
     var selectedLevelInfo by remember { mutableStateOf<LevelInfo?>(null) }
 
     val activity = uiState.activities.find { it.id == selectedActivityId } ?: uiState.activities.firstOrNull() ?: return
+    val isHabitQuit = activity.activityType == ActivityType.HABIT_QUIT
+    val isHabitBuild = activity.activityType == ActivityType.HABIT_BUILD
+
     val progState = uiState.progressionStates[activity.id] ?: ProgressionEngine.calculateProgression(activity.id, 0)
     val color = parseColor(activity.colorHex)
 
-    val allLevels = remember(activity.id) {
-        ProgressionEngine.getAllLevelsForActivity(activity.id)
+    val allLevels = remember(activity.id, isHabitQuit, isHabitBuild) {
+        ProgressionEngine.getAllLevelsForActivity(activity.id, isHabitQuit = isHabitQuit, isHabitBuild = isHabitBuild)
     }
 
     LazyColumn(
@@ -100,32 +104,29 @@ fun LevelsScreen(
                         },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = actColor,
-                            selectedLabelColor = Color.White,
+                            selectedLabelColor = Color(0xFF0A0A0A),
                             containerColor = Color(0xFF141414),
                             labelColor = Color(0xFFA1A1AA)
                         ),
                         border = FilterChipDefaults.filterChipBorder(
                             enabled = true,
                             selected = isSelected,
-                            borderColor = Color.White.copy(alpha = 0.06f),
+                            borderColor = Color.White.copy(alpha = 0.08f),
                             selectedBorderColor = actColor
-                        )
+                        ),
+                        shape = RoundedCornerShape(12.dp)
                     )
                 }
             }
         }
 
-        // 3. Current Level Showcase Hero Card
+        // 3. Current Rank Focus Hero Card
         item {
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(24.dp))
-                    .border(
-                        width = 1.dp,
-                        color = color.copy(alpha = 0.35f),
-                        shape = RoundedCornerShape(24.dp)
-                    ),
+                    .border(1.dp, color.copy(alpha = 0.35f), RoundedCornerShape(24.dp)),
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF141414)),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
@@ -135,104 +136,140 @@ fun LevelsScreen(
                         .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Level Badge / Emblem Canvas
                     PrestigeEmblem(
                         activityId = activity.id,
                         level = progState.currentLevel,
-                        size = 96.dp,
-                        isUnlocked = true,
-                        isAnimated = true
+                        size = 110.dp,
+                        isAnimated = true,
+                        isHabitQuit = isHabitQuit,
+                        isHabitBuild = isHabitBuild
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
 
                     Text(
-                        text = "LEVEL ${progState.currentLevel}",
-                        style = MaterialTheme.typography.labelMedium.copy(
+                        text = "LEVEL ${progState.currentLevel}".uppercase(),
+                        style = MaterialTheme.typography.labelSmall.copy(
                             fontWeight = FontWeight.Bold,
                             letterSpacing = 2.sp,
                             fontSize = 11.sp
                         ),
-                        color = color
+                        color = Color(0xFFA1A1AA)
                     )
 
                     Spacer(modifier = Modifier.height(2.dp))
 
                     Text(
-                        text = progState.currentTitle.uppercase(),
-                        style = MaterialTheme.typography.headlineSmall.copy(
+                        text = progState.currentTitle,
+                        style = MaterialTheme.typography.headlineMedium.copy(
                             fontWeight = FontWeight.Bold,
-                            letterSpacing = 1.sp
+                            fontSize = 24.sp
                         ),
                         color = Color(0xFFF5F5F4)
                     )
 
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(6.dp))
 
-                    val (lore, _) = ProgressionEngine.getLevelTitle(activity.id, progState.currentLevel).let { it.second to it.first }
+                    val desc = ProgressionEngine.getLevelTitle(
+                        activity.id,
+                        progState.currentLevel,
+                        isHabitQuit = isHabitQuit,
+                        isHabitBuild = isHabitBuild
+                    ).second
                     Text(
-                        text = lore,
-                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 13.sp, lineHeight = 18.sp),
-                        color = Color(0xFFA1A1AA),
+                        text = "\"$desc\"",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
+                            fontSize = 13.sp
+                        ),
+                        color = Color(0xFFD4D4D8),
                         textAlign = TextAlign.Center
                     )
 
                     Spacer(modifier = Modifier.height(20.dp))
 
-                    // XP Progress Curve Bar
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "${progState.currentXp} XP",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = Color(0xFFF5F5F4)
+                    // Progress to Next Rank
+                    if (!progState.isMaxLevel) {
+                        val metricUnit = if (isHabitQuit || isHabitBuild) "DAYS" else "XP"
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "NEXT: LVL ${progState.currentLevel + 1}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp,
+                                    fontSize = 10.sp
+                                ),
+                                color = Color(0xFFA1A1AA)
+                            )
+                            Text(
+                                text = "${progState.currentXp} / ${progState.nextLevelXp} $metricUnit",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp
+                                ),
+                                color = color
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        LinearProgressIndicator(
+                            progress = { progState.progressToNextLevel },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                                .clip(CircleShape),
+                            color = color,
+                            trackColor = Color.White.copy(alpha = 0.06f)
                         )
-                        Text(
-                            text = if (progState.isMaxLevel) "MAX LEVEL REACHED" else "Target: ${progState.nextLevelXp} XP",
-                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                            color = if (progState.isMaxLevel) GoldLight else Color(0xFF71717A)
-                        )
+                    } else {
+                        Surface(
+                            color = GoldPrimary.copy(alpha = 0.15f),
+                            shape = RoundedCornerShape(100.dp),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, GoldPrimary.copy(alpha = 0.4f))
+                        ) {
+                            Text(
+                                text = "SUPREME TRANSCENDENCE UNLOCKED",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.5.sp,
+                                    fontSize = 10.sp
+                                ),
+                                color = GoldPrimary,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                            )
+                        }
                     }
-
-                    Spacer(modifier = Modifier.height(8.dp))
-
-                    LinearProgressIndicator(
-                        progress = { progState.progressToNextLevel },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(8.dp)
-                            .clip(CircleShape),
-                        color = color,
-                        trackColor = Color.White.copy(alpha = 0.06f)
-                    )
 
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    // Soft Decay Protected Floor Information
+                    // Protected Decay Floor Display (Requirement 1)
+                    val metricUnit = if (isHabitQuit || isHabitBuild) "DAYS" else "XP"
                     Surface(
-                        color = Color(0xFF1A1A1A),
-                        shape = RoundedCornerShape(12.dp),
-                        border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.05f))
+                        color = Color.White.copy(alpha = 0.04f),
+                        shape = RoundedCornerShape(8.dp)
                     ) {
                         Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 8.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Shield,
-                                contentDescription = "Protected Floor",
+                                contentDescription = null,
                                 tint = GoldPrimary,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(12.dp)
                             )
-                            Spacer(modifier = Modifier.width(8.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Protected Floor: ${progState.protectedFloorXp} XP (Soft Decay Floor)",
-                                style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                                text = "Current Level Decay Floor: ${progState.protectedFloorXp} $metricUnit (Floor preserved)",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
                                 color = Color(0xFFA1A1AA)
                             )
                         }
@@ -241,38 +278,23 @@ fun LevelsScreen(
             }
         }
 
-        // 4. Section Title: All 13 Levels
+        // 4. Section Title: Complete 13-Level Ascendance Roadmap
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "ROADMAP OF ASCENT",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 2.sp,
-                        fontSize = 10.sp
-                    ),
-                    color = Color(0xFFA1A1AA)
-                )
-
-                Text(
-                    text = "13 TIERS",
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 10.sp,
-                        letterSpacing = 1.sp
-                    ),
-                    color = Color(0xFF71717A)
-                )
-            }
+            Text(
+                text = "ROADMAP & EMBLEMS",
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 2.sp,
+                    fontSize = 10.sp
+                ),
+                color = Color(0xFFA1A1AA)
+            )
         }
 
-        // 5. 13 Level Roadmap Items
-        items(allLevels) { levelInfo ->
-            val isUnlocked = progState.currentLevel >= levelInfo.level
-            val isCurrent = progState.currentLevel == levelInfo.level
+        // 5. 13-Level Roadmap Items
+        items(allLevels) { lvl ->
+            val isUnlocked = lvl.level <= progState.currentLevel
+            val isCurrent = lvl.level == progState.currentLevel
 
             Card(
                 modifier = Modifier
@@ -280,12 +302,12 @@ fun LevelsScreen(
                     .clip(RoundedCornerShape(20.dp))
                     .border(
                         width = if (isCurrent) 1.5.dp else 1.dp,
-                        color = if (isCurrent) color.copy(alpha = 0.6f) else Color.White.copy(alpha = 0.05f),
+                        color = if (isCurrent) color else Color.White.copy(alpha = 0.05f),
                         shape = RoundedCornerShape(20.dp)
                     )
-                    .clickable { selectedLevelInfo = levelInfo },
+                    .clickable { selectedLevelInfo = lvl },
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isCurrent) Color(0xFF181818) else Color(0xFF141414)
+                    containerColor = if (isCurrent) Color(0xFF18181A) else Color(0xFF141414)
                 ),
                 elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
             ) {
@@ -293,115 +315,124 @@ fun LevelsScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        // Level Emblem
-                        PrestigeEmblem(
-                            activityId = activity.id,
-                            level = levelInfo.level,
-                            size = 48.dp,
-                            isUnlocked = isUnlocked
-                        )
+                    PrestigeEmblem(
+                        activityId = activity.id,
+                        level = lvl.level,
+                        size = 52.dp,
+                        isUnlocked = isUnlocked,
+                        isAnimated = isCurrent,
+                        isHabitQuit = isHabitQuit,
+                        isHabitBuild = isHabitBuild
+                    )
 
-                        Spacer(modifier = Modifier.width(14.dp))
+                    Spacer(modifier = Modifier.width(16.dp))
 
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "LEVEL ${levelInfo.level}",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        fontWeight = FontWeight.Bold,
-                                        letterSpacing = 1.sp,
-                                        fontSize = 10.sp
-                                    ),
-                                    color = if (isUnlocked) color else Color(0xFF71717A)
-                                )
-                                if (isCurrent) {
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Surface(
-                                        color = color.copy(alpha = 0.15f),
-                                        shape = RoundedCornerShape(4.dp)
-                                    ) {
-                                        Text(
-                                            text = "CURRENT",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 8.sp,
-                                                letterSpacing = 0.5.sp
-                                            ),
-                                            color = color,
-                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                        )
-                                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "LEVEL ${lvl.level}",
+                                style = MaterialTheme.typography.labelSmall.copy(
+                                    fontWeight = FontWeight.Bold,
+                                    letterSpacing = 1.sp,
+                                    fontSize = 10.sp
+                                ),
+                                color = if (isUnlocked) color else Color(0xFF71717A)
+                            )
+                            if (isCurrent) {
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Surface(
+                                    color = color.copy(alpha = 0.2f),
+                                    shape = RoundedCornerShape(4.dp)
+                                ) {
+                                    Text(
+                                        text = "CURRENT",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 8.sp,
+                                            letterSpacing = 0.5.sp
+                                        ),
+                                        color = color,
+                                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                                    )
                                 }
                             }
-
-                            Spacer(modifier = Modifier.height(2.dp))
-
-                            Text(
-                                text = levelInfo.title,
-                                style = MaterialTheme.typography.titleMedium.copy(
-                                    fontWeight = FontWeight.SemiBold,
-                                    fontSize = 15.sp,
-                                    color = if (isUnlocked) Color(0xFFF5F5F4) else Color(0xFF71717A)
-                                )
-                            )
-
-                            Text(
-                                text = "${levelInfo.xpThreshold} XP required",
-                                style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
-                                color = Color(0xFF71717A)
-                            )
                         }
+
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        Text(
+                            text = lvl.title,
+                            style = MaterialTheme.typography.titleMedium.copy(
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 15.sp
+                            ),
+                            color = if (isUnlocked) Color(0xFFF5F5F4) else Color(0xFF71717A)
+                        )
+
+                        Spacer(modifier = Modifier.height(2.dp))
+
+                        val unit = if (isHabitQuit || isHabitBuild) "days" else "XP"
+                        Text(
+                            text = "${lvl.xpThreshold} $unit required",
+                            style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                            color = Color(0xFF71717A)
+                        )
                     }
 
-                    // Status icon / badge
-                    when {
-                        isUnlocked -> {
-                            Box(
-                                modifier = Modifier
-                                    .size(28.dp)
-                                    .clip(CircleShape)
-                                    .background(EmeraldMeditation.copy(alpha = 0.15f)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Completed",
-                                    tint = EmeraldMeditation,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                            }
-                        }
-                        else -> {
+                    if (isUnlocked) {
+                        Box(
+                            modifier = Modifier
+                                .size(28.dp)
+                                .clip(CircleShape)
+                                .background(color.copy(alpha = 0.15f)),
+                            contentAlignment = Alignment.Center
+                        ) {
                             Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "Locked",
-                                tint = Color(0xFF52525B),
-                                modifier = Modifier.size(18.dp)
+                                imageVector = Icons.Default.Check,
+                                contentDescription = "Unlocked",
+                                tint = color,
+                                modifier = Modifier.size(16.dp)
                             )
                         }
+                    } else {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Locked",
+                            tint = Color(0xFF3F3F46),
+                            modifier = Modifier.size(18.dp)
+                        )
                     }
                 }
             }
         }
     }
 
-    // Level Details Dialog on Click
-    selectedLevelInfo?.let { info ->
-        val isUnlocked = progState.currentLevel >= info.level
-        LevelUpDialog(
-            activityName = activity.name,
-            activityId = activity.id,
-            level = info.level,
-            title = info.title,
-            description = "${info.description}\n\nRequired XP: ${info.xpThreshold} XP (${if (isUnlocked) "UNLOCKED" else "LOCKED"})",
-            onDismiss = { selectedLevelInfo = null }
+    selectedLevelInfo?.let { lvl ->
+        AlertDialog(
+            onDismissRequest = { selectedLevelInfo = null },
+            title = { Text("Level ${lvl.level}: ${lvl.title}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "\"${lvl.description}\"",
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                        )
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    val unit = if (isHabitQuit || isHabitBuild) "days continuous streak" else "accumulated XP"
+                    Text(
+                        text = "Threshold: ${lvl.xpThreshold} $unit required to achieve this rank.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { selectedLevelInfo = null }) { Text("Close") }
+            }
         )
     }
 }

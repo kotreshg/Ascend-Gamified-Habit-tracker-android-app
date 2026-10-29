@@ -4,14 +4,16 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
-import androidx.room.TypeConverters
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.dao.ActivityDao
 import com.example.data.dao.BreakDao
+import com.example.data.dao.HabitCompletionDao
 import com.example.data.dao.SessionDao
 import com.example.data.dao.SettingsDao
 import com.example.data.model.ActivityEntity
+import com.example.data.model.ActivityType
 import com.example.data.model.BreakEntity
+import com.example.data.model.HabitCompletionEntity
 import com.example.data.model.SessionEntity
 import com.example.data.model.UserSettingsEntity
 import kotlinx.coroutines.CoroutineScope
@@ -23,15 +25,17 @@ import kotlinx.coroutines.launch
         ActivityEntity::class,
         SessionEntity::class,
         BreakEntity::class,
+        HabitCompletionEntity::class,
         UserSettingsEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AscendDatabase : RoomDatabase() {
     abstract fun activityDao(): ActivityDao
     abstract fun sessionDao(): SessionDao
     abstract fun breakDao(): BreakDao
+    abstract fun habitCompletionDao(): HabitCompletionDao
     abstract fun settingsDao(): SettingsDao
 
     companion object {
@@ -44,6 +48,8 @@ abstract class AscendDatabase : RoomDatabase() {
                 name = "Meditation",
                 description = "Stillness, breath awareness & mindfulness",
                 dailyGoalMinutes = 120, // 2 hours default
+                activityType = ActivityType.TIME_BASED,
+                scheduledDays = "1,2,3,4,5,6,7",
                 isCore = true,
                 contributesToMainSystem = true,
                 colorHex = "#10B981", // Emerald
@@ -55,6 +61,8 @@ abstract class AscendDatabase : RoomDatabase() {
                 name = "Study",
                 description = "Deep intellectual immersion & skill mastery",
                 dailyGoalMinutes = 180, // 3 hours default
+                activityType = ActivityType.TIME_BASED,
+                scheduledDays = "1,2,3,4,5,6,7",
                 isCore = true,
                 contributesToMainSystem = true,
                 colorHex = "#38BDF8", // Cyan / Intellectual Blue
@@ -66,6 +74,8 @@ abstract class AscendDatabase : RoomDatabase() {
                 name = "Workout",
                 description = "Physical discipline, strength & endurance",
                 dailyGoalMinutes = 60, // 1 hour default
+                activityType = ActivityType.TIME_BASED,
+                scheduledDays = "1,2,3,4,5,6,7",
                 isCore = true,
                 contributesToMainSystem = true,
                 colorHex = "#F97316", // Flame Orange
@@ -77,6 +87,8 @@ abstract class AscendDatabase : RoomDatabase() {
                 name = "Sleep",
                 description = "Circadian restoration & biological recovery",
                 dailyGoalMinutes = 480, // 8 hours default
+                activityType = ActivityType.TIME_BASED,
+                scheduledDays = "1,2,3,4,5,6,7",
                 isCore = true,
                 contributesToMainSystem = true,
                 colorHex = "#A855F7", // Moonlit Indigo / Purple
@@ -92,6 +104,7 @@ abstract class AscendDatabase : RoomDatabase() {
                     AscendDatabase::class.java,
                     "ascend_mastery.db"
                 )
+                    .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback(scope))
                     .build()
                 INSTANCE = instance

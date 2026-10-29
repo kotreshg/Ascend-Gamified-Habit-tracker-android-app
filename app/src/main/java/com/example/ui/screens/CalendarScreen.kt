@@ -7,6 +7,9 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -17,6 +20,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.ActivityType
 import com.example.domain.engine.DaySummary
 import com.example.ui.components.HeatmapCalendar
 import com.example.ui.theme.*
@@ -121,7 +125,7 @@ fun CalendarScreen(
                         },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = color,
-                            selectedLabelColor = Color.White,
+                            selectedLabelColor = Color(0xFF0A0A0A),
                             containerColor = Color(0xFF141414),
                             labelColor = Color(0xFFA1A1AA)
                         ),
@@ -180,7 +184,7 @@ fun CalendarScreen(
                             Text(
                                 text = if (daySummary != null && daySummary.totalActiveMinutes > 0) {
                                     "${daySummary.totalActiveMinutes / 60}h ${daySummary.totalActiveMinutes % 60}m Active • ${daySummary.totalXp} XP Earned"
-                                } else "No activity recorded on this date",
+                                } else "Discipline log for this date",
                                 style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
                                 color = Color(0xFF71717A)
                             )
@@ -227,53 +231,119 @@ fun CalendarScreen(
                     uiState.activities.filter {
                         if (selectedActivityId == "all") true else it.id == selectedActivityId
                     }.forEach { act ->
-                        val actMin = daySummary?.activityMinutes?.get(act.id) ?: 0
-                        val goalMin = act.dailyGoalMinutes
-                        val pct = daySummary?.activityPercentages?.get(act.id) ?: 0f
-                        val xp = daySummary?.activityXp?.get(act.id) ?: 0
                         val color = parseColor(act.colorHex)
+                        val isScheduled = act.isScheduledOn(selectedDate)
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .clip(RoundedCornerShape(3.dp))
-                                        .background(color)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = act.name,
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
-                                    color = Color(0xFFF5F5F4)
-                                )
+                        if (act.activityType == ActivityType.TIME_BASED) {
+                            val actMin = daySummary?.activityMinutes?.get(act.id) ?: 0
+                            val goalMin = act.dailyGoalMinutes
+                            val pct = daySummary?.activityPercentages?.get(act.id) ?: 0f
+                            val xp = daySummary?.activityXp?.get(act.id) ?: 0
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(color)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = act.name,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                            color = Color(0xFFF5F5F4)
+                                        )
+                                        if (!isScheduled) {
+                                            Text("Not scheduled on this day", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = Color(0xFF71717A))
+                                        }
+                                    }
+                                }
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        text = "${actMin / 60}h ${actMin % 60}m",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = Color(0xFFF5F5F4)
+                                    )
+                                    Text(
+                                        text = " / ${goalMin / 60}h",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color(0xFF71717A)
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Surface(
+                                        color = if (pct >= 1f) Tier4Color.copy(alpha = 0.15f) else Color(0xFF1E1E22),
+                                        shape = RoundedCornerShape(6.dp)
+                                    ) {
+                                        Text(
+                                            text = "+$xp XP",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
+                                            color = if (pct >= 1f) Tier4Color else Color(0xFFA1A1AA),
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        )
+                                    }
+                                }
                             }
+                        } else {
+                            // Habit completion status on this date
+                            val completion = uiState.allHabitCompletions.find { it.activityId == act.id && it.dateString == dateStr }
+                            val isCompleted = completion?.isSuccess == true
+                            val isRelapse = completion != null && !completion.isSuccess
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "${actMin / 60}h ${actMin % 60}m",
-                                    style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = Color(0xFFF5F5F4)
-                                )
-                                Text(
-                                    text = " / ${goalMin / 60}h",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = Color(0xFF71717A)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(10.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(color)
+                                    )
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Column {
+                                        Text(
+                                            text = act.name,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Medium),
+                                            color = Color(0xFFF5F5F4)
+                                        )
+                                        Text(
+                                            text = if (act.activityType == ActivityType.HABIT_QUIT) "Habit Quit" else "Habit Build",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
+                                            color = Color(0xFF71717A)
+                                        )
+                                    }
+                                }
+
                                 Surface(
-                                    color = if (pct >= 1f) Tier4Color.copy(alpha = 0.15f) else Color(0xFF1E1E22),
+                                    color = when {
+                                        isCompleted -> EmeraldMeditation.copy(alpha = 0.15f)
+                                        isRelapse -> Color(0xFFEF4444).copy(alpha = 0.15f)
+                                        else -> Color(0xFF1E1E22)
+                                    },
                                     shape = RoundedCornerShape(6.dp)
                                 ) {
                                     Text(
-                                        text = "+$xp XP",
+                                        text = when {
+                                            isCompleted -> if (act.activityType == ActivityType.HABIT_QUIT) "Clean 🛡️" else "Completed ✓"
+                                            isRelapse -> "Relapse ⚠️"
+                                            else -> if (isScheduled) "Pending" else "Off day"
+                                        },
                                         style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, fontSize = 10.sp),
-                                        color = if (pct >= 1f) Tier4Color else Color(0xFFA1A1AA),
-                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                        color = when {
+                                            isCompleted -> EmeraldMeditation
+                                            isRelapse -> Color(0xFFEF4444)
+                                            else -> Color(0xFF71717A)
+                                        },
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
                                     )
                                 }
                             }
